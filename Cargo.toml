@@ -1,0 +1,8 @@
+[package]
+name = "dedupe_folders"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+gxhash = "3.4.1"
