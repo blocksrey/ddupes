@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 gxhash = "3.4.1"
+rayon = "1.10.0"
+dashmap = "6.0.1"

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
-use gxhash::{gxhash128, HashMap, HashMapExt};
-use std::{collections::HashSet, env, fs};
+use gxhash::gxhash128;
+use rayon::prelude::*;
+use std::{collections::HashMap as StdHashMap, env, fs};
+use dashmap::DashMap;
 
 const SEED: i64 = 109832;
 
@@ -25,38 +27,43 @@ fn get_file_checksum(path: &str) -> Result<u128> {
 fn get_state(item: &Item) -> Result<u128> {
 	if item.is_file {
 		get_file_checksum(&item.path)
-	}
-	else if let Some(children) = &item.children {
+	} else if let Some(children) = &item.children {
 		compute_children_checksum(children)
-	}
-	else {
+	} else {
 		Err(anyhow::anyhow!("Unexpected item type"))
 	}
 }
 
 fn compute_children_checksum(children: &[Item]) -> Result<u128> {
-	let mut state_bytes = Vec::new();
-
-	for child in children {
-		let child_state = get_state(child)?;
-		state_bytes.extend_from_slice(&child_state.to_be_bytes());
-	}
+	let state_bytes: Vec<u8> = children
+		.par_iter()
+		.filter_map(|child| get_state(child).ok().map(|state| state.to_be_bytes()))
+		.flatten()
+		.collect();
 
 	Ok(compute_checksum(&state_bytes))
 }
 
-fn get_item(path: &str, items: &mut HashMap<String, Item>) -> Result<Item> {
-	if let Some(item) = items.get(path).cloned() {
-		return Ok(item);
+fn get_item(
+	path: &str,
+	items: &DashMap<String, Item>,
+	seen_states: &DashMap<u128, String>
+) -> Result<Item> {
+	if let Some(item) = items.get(path) {
+		return Ok(item.clone());
 	}
 
 	let metadata = fs::metadata(path)
 		.with_context(|| format!("Failed to read metadata for path: {}", path))?;
 	let is_file = metadata.is_file();
 	let is_folder = metadata.is_dir();
-	let children = if is_folder { Some(get_children(path, items)?) } else { None };
+	let children = if is_folder {
+		Some(get_children(path, items, seen_states)?)
+	} else {
+		None
+	};
 
-	let mut item = Item {
+	let item = Item {
 		path: path.to_string(),
 		is_file,
 		is_folder,
@@ -64,47 +71,48 @@ fn get_item(path: &str, items: &mut HashMap<String, Item>) -> Result<Item> {
 		state: None,
 	};
 
-	item.state = Some(get_state(&item)?);
+	let state = get_state(&item)?;
+	let mut item = item;
+	item.state = Some(state);
+
+	if let Some(existing_path) = seen_states.get(&state) {
+		if item.is_folder {
+			println!("Removing: {}", path);
+			// Handle the directory removal with proper error handling
+			// fs::remove_dir_all(path).with_context(|| format!("Failed to remove directory: {}", path))?;
+		}
+	} else {
+		seen_states.insert(state, path.to_string());
+	}
+
 	items.insert(path.to_string(), item.clone());
 
 	Ok(item)
 }
 
-fn get_children(path: &str, items: &mut HashMap<String, Item>) -> Result<Vec<Item>> {
+fn get_children(
+	path: &str,
+	items: &DashMap<String, Item>,
+	seen_states: &DashMap<u128, String>
+) -> Result<Vec<Item>> {
 	fs::read_dir(path)
 		.with_context(|| format!("Failed to read directory: {}", path))?
+		.par_bridge()
+		.filter_map(Result::ok)
 		.map(|entry| {
-			let entry = entry.with_context(|| format!("Failed to read entry in directory: {}", path))?;
 			let path_str = entry.path().to_string_lossy().to_string();
-			get_item(&path_str, items).with_context(|| format!("Failed to get item for path: {}", path_str))
+			get_item(&path_str, items, seen_states)
+				.with_context(|| format!("Failed to get item for path: {}", path_str))
 		})
 		.collect()
 }
 
-fn remove_duplicate_folders(items: &HashMap<String, Item>) -> Result<()> {
-	let mut seen_states = HashSet::new();
-
-	for (path, item) in items.iter() {
-		if let Some(state) = &item.state {
-			if seen_states.contains(state) && item.is_folder {
-				println!("Removing: {}", path);
-				// Handle the directory removal with proper error handling
-				// fs::remove_dir_all(path)
-				// 	.with_context(|| format!("Failed to remove directory: {}", path))?;
-			}
-			else {
-				seen_states.insert(state.clone());
-			}
-		}
-	}
-
-	Ok(())
-}
-
 fn main() -> Result<()> {
-	let root = env::current_dir().context("Failed to get current directory")?;
-	let mut items = HashMap::new();
-	let root_item = get_item(root.to_str().ok_or_else(|| anyhow::anyhow!("Path is not valid UTF-8"))?, &mut items)?;
-	remove_duplicate_folders(&items)?;
+	let root_path = env::args().nth(1).context("Please provide the root path as an argument")?;
+
+	let items = DashMap::new();
+	let seen_states = DashMap::new();
+	let _root_item = get_item(&root_path, &items, &seen_states)?;
+
 	Ok(())
 }
