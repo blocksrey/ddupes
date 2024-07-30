@@ -1,0 +1,10 @@
+- Add command-line options
+x Make it faster
+- Make it identify where it found the other duplicates of said item
+- Support for audio sums
+- Support for metadata sums
+- Support for name sums
+- Support for path name sums
+x Support for file content sums
+- Support for replacing deletions with symbolic links
+- Make sure things are in some kind of consistent order (alphabetical, size, etc. idk)

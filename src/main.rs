@@ -1,12 +1,15 @@
 use anyhow::{Context, Result};
-use gxhash::gxhash128;
-use rayon::prelude::*;
-use std::{collections::HashMap as StdHashMap, env, fs};
 use dashmap::DashMap;
+use gxhash::{gxhash128, GxHasher};
+use rayon::prelude::*;
+use std::fs::File;
+use std::hash::Hasher;
+use std::io::Read;
+use std::{env, fs};
 
 const SEED: i64 = 109832;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Item {
 	path: String,
 	is_file: bool,
@@ -20,16 +23,28 @@ fn compute_checksum(input: &[u8]) -> u128 {
 }
 
 fn get_file_checksum(path: &str) -> Result<u128> {
-	let content = fs::read(path).context("Failed to read file")?;
-	Ok(compute_checksum(&content))
+	let mut file = File::open(path).context("Failed to open file")?;
+	let mut hasher = GxHasher::with_seed(SEED);
+	let mut buffer = [0; 65536];
+
+	while let Ok(bytes_read) = file.read(&mut buffer) {
+		if bytes_read == 0 {
+			break;
+		}
+		hasher.write(&buffer[..bytes_read]);
+	}
+
+	Ok(hasher.finish_u128())
 }
 
 fn get_state(item: &Item) -> Result<u128> {
 	if item.is_file {
 		get_file_checksum(&item.path)
-	} else if let Some(children) = &item.children {
+	}
+	else if let Some(children) = &item.children {
 		compute_children_checksum(children)
-	} else {
+	}
+	else {
 		Err(anyhow::anyhow!("Unexpected item type"))
 	}
 }
@@ -59,7 +74,8 @@ fn get_item(
 	let is_folder = metadata.is_dir();
 	let children = if is_folder {
 		Some(get_children(path, items, seen_states)?)
-	} else {
+	}
+	else {
 		None
 	};
 
@@ -81,7 +97,8 @@ fn get_item(
 			// Handle the directory removal with proper error handling
 			// fs::remove_dir_all(path).with_context(|| format!("Failed to remove directory: {}", path))?;
 		}
-	} else {
+	}
+	else {
 		seen_states.insert(state, path.to_string());
 	}
 
