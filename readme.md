@@ -15,7 +15,7 @@ Struggling with duplicate files and directories? ddupes simplifies the process b
 ## Installation
 1. Clone the repository:
 ```sh
-git clone https://github.com/blocksrey/ddupes.git
+git clone https://github.com/jskinnerd/ddupes.git
 cd ddupes
 ```
 
@@ -32,4 +32,4 @@ ddupes <path_to_scan>
 
 ## License
 For more information and to view the license, visit:
-http://www.blocksrey.com/puniko/index.htm
+http://www.jskinnerd.com/puniko/index.htm
